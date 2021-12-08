@@ -24,11 +24,6 @@ display(dataset)
 
 # COMMAND ----------
 
-# MAGIC %sql
-# MAGIC data
-
-# COMMAND ----------
-
 # MAGIC %md 
 # MAGIC ## Train Model and Track Experiments
 
@@ -65,9 +60,10 @@ with mlflow.start_run():
   
   #TODO: how can you use MLFLow to log your metrics (precision, recall, f1 etc) 
   #Tips: what about auto logging ?
+  mlflow.log_param("metrics", metrics.accuracy)
   
   #TODO: log your model under "turbine_gbt"
-  mlflow.spark.log_model("/turbine_pred_gbt")
+  mlflow.spark.log_model(pipelineTrained, "ssm_turbine_pred_gbt")
   mlflow.set_tag("model", "turbine_gbt")
 
 # COMMAND ----------
@@ -77,18 +73,30 @@ with mlflow.start_run():
 
 # COMMAND ----------
 
+best_model = mlflow.search_runs(filter_string='tags.model="turbine_gbt" and attributes.status = "FINISHED"', max_results=1).iloc[0]
+model_registered = mlflow.register_model("dbfs:/databricks/mlflow-tracking/29251126759236/68b9dfc586e344f499da48ed51659d67/artifacts/ssm_turbine_pred_gbt", "smm_registered_model")
+
+# COMMAND ----------
+
 #get the best model from the registry
-best_model = mlflow.search_runs(filter_string='tags.model="turbine_gbt" and attributes.status = "FINISHED" and metrics.f1 > 0', max_results=1).iloc[0]
+#best_model = mlflow.search_runs(filter_string='tags.model="turbine_gbt" and attributes.status = "FINISHED" and metrics.avg_f1 > 0', max_results=1).iloc[0]
 #TODO: register the model to MLFLow registry
-model_registered = mlflow.register_model("runs:/ ... 
+#model_registered = mlflow.register_model("runs:/ ... 
 
 # COMMAND ----------
 
 # DBTITLE 1,Flag version as staging/production ready
+
 client = mlflow.tracking.MlflowClient()
 print("registering model version "+model_registered.version+" as production model")
 #TODO: transition the model version = model_registered.version to the stage Production
-client...
+#client...
+client.transition_model_version_stage(
+  name=model_registered.name,
+  version=model_registered.version,
+  stage="Production",
+)
+
 
 # COMMAND ----------
 
@@ -104,8 +112,13 @@ client...
 # COMMAND ----------
 
 #TODO: load the model from the registry
-get_status_udf = mlflow.pyfunc....
+get_status_udf = mlflow.pyfunc.load_model(f"models:/{model_registered.name}/production")
+
 #TODO: define the model as a SQL function to be able to call it in SQL
+
+# COMMAND ----------
+
+
 
 # COMMAND ----------
 
