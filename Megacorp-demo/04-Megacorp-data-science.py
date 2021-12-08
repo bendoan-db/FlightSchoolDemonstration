@@ -19,12 +19,11 @@ dbutils.widgets.dropdown("reset_all_data", "false", ["true", "false"], "Reset al
 # COMMAND ----------
 
 #read in gold table from ingestion process
-dataset = spark.read.table("turbine_gold_for_ml")
-display(dataset)
+dataset = spark.read.table("dec21_flightschool_team2.turbines_gold")
+dataset_siver = spark.read.table("dec21_flightschool_team2.turbines_silver")
+dataset_siver.printSchema()
 
 # COMMAND ----------
-
-# MAGIC %md 
 # MAGIC ## Train Model and Track Experiments
 
 # COMMAND ----------
@@ -139,3 +138,114 @@ spark.udf.register("predict_status", get_status_udf)
 # MAGIC Where are you in your story ?
 # MAGIC 
 # MAGIC This was a bit annoying to write all this code, and it's not coming with best practices like hyperparameter tuning. What could you leverage within databricks to accelerate this implementation / your customer POC?
+
+# COMMAND ----------
+
+import os
+import requests
+import numpy as np
+import pandas as pd
+
+def create_tf_serving_json(data):
+  return {'inputs': {name: data[name].tolist() for name in data.keys()} if isinstance(data, dict) else data.tolist()}
+
+def score_model(dataset):
+  url = 'https://e2-demo-field-eng.cloud.databricks.com/model/dec21_flightschool_team2_predict_turbine_status/1/invocations'
+  headers = {'Authorization': f'Bearer {os.environ.get("DATABRICKS_TOKEN")}'}
+  data_json = dataset.to_dict(orient='split') if isinstance(dataset, pd.DataFrame) else create_tf_serving_json(dataset)
+  response = requests.request(method='POST', headers=headers, url=url, json=data_json)
+  if response.status_code != 200:
+    raise Exception(f'Request failed with status {response.status_code}, {response.text}')
+  return response.json()
+
+# COMMAND ----------
+
+dataset.printSchema
+
+# COMMAND ----------
+
+pandas_data = dataset.sample(.000001).toPandas()
+pandas_data.dtypes
+
+# COMMAND ----------
+
+df_string_2 = pandas_data.to_json()
+
+# COMMAND ----------
+
+type(df_string_2)
+
+# COMMAND ----------
+
+dbutils.fs.put("/home/nicholas.barretta@databricks.com/inference_text_6.txt", df_string_2)
+
+# COMMAND ----------
+
+dataset.sample(0.1)
+
+# COMMAND ----------
+
+
+
+# COMMAND ----------
+
+inference_dataset = dataset.drop('status').sample(0.25)
+
+# COMMAND ----------
+
+score_model(pandas_data)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC 
+# MAGIC ## START HERE
+
+# COMMAND ----------
+
+inference_table_doan = dataset.sample(0.000001).drop("status")
+
+# COMMAND ----------
+
+
+
+# COMMAND ----------
+
+inference_table_doan.write.format("delta").saveAsTable("dec21_flightschool_team2.inference_table")
+
+# COMMAND ----------
+
+import mlflow
+logged_model = 'runs:/1b18933689434a79ab6d0ed785dd4388/model'
+
+# Load model as a Spark UDF.
+loaded_model = mlflow.pyfunc.spark_udf(spark, model_uri=logged_model)
+
+# Predict on a Spark DataFrame.
+columns = list(inference_table_doan.columns)
+inference_table_doan.withColumn('predictions', loaded_model(*columns)).collect()
+
+# COMMAND ----------
+
+itpd = inference_table_doan.toPandas()
+
+# COMMAND ----------
+
+import mlflow.pyfunc
+
+model_name = "dec21_flightschool_team2_predict_turbine_status"
+model_version = 1
+
+model = mlflow.pyfunc.load_model(
+    model_uri=f"models:/{model_name}/{model_version}"
+)
+
+model.predict(itpd)
+
+# COMMAND ----------
+
+inference_table_doan.printSchema()
+
+# COMMAND ----------
+
+
