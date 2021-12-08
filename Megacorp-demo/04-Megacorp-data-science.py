@@ -60,7 +60,7 @@ with mlflow.start_run():
   
   #TODO: how can you use MLFLow to log your metrics (precision, recall, f1 etc) 
   #Tips: what about auto logging ?
-  mlflow.log_param("metrics", metrics.accuracy)
+  mlflow.log_metric("accuracy", metrics.accuracy)
   
   #TODO: log your model under "turbine_gbt"
   mlflow.spark.log_model(pipelineTrained, "ssm_turbine_pred_gbt")
@@ -112,19 +112,21 @@ client.transition_model_version_stage(
 # COMMAND ----------
 
 #TODO: load the model from the registry
-get_status_udf = mlflow.pyfunc.load_model(f"models:/{model_registered.name}/production")
+get_status_udf = mlflow.pyfunc.spark_udf(spark, f"models:/{model_registered.name}/production", "string")
+spark.udf.register("predict_status", get_status_udf)
 
 #TODO: define the model as a SQL function to be able to call it in SQL
 
 # COMMAND ----------
 
-
+# MAGIC %sql
+# MAGIC --TODO: call the model in SQL using the udf registered as function
+# MAGIC select *, predict_status(AN3, AN4, AN5, AN6, AN7, AN8, AN9, AN10) as status_forecast from turbine_gold_for_ml LIMIT 5
 
 # COMMAND ----------
 
 # MAGIC %sql
-# MAGIC --TODO: call the model in SQL using the udf registered as function
-# MAGIC select *, ... as status_forecast from turbine_gold_for_ml
+# MAGIC SELECT * from turbine_gold_for_ml
 
 # COMMAND ----------
 
