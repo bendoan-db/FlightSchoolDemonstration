@@ -7,9 +7,6 @@
 
 # COMMAND ----------
 
-#TODO
-#In python or SQL, rewrite the transformations from notebook 01-Megacorp-data-ingestion using DLT, and building the DLT graph
-#Add some expectations
 #go in Job => DLT, create your DLT pointing to your notebook
 #help: https://docs.databricks.com/data-engineering/delta-live-tables/index.html
 #Remember: you can use the retail DLT as example
