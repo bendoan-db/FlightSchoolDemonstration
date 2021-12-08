@@ -3,12 +3,8 @@ dbutils.widgets.dropdown("reset_all_data", "false", ["true", "false"], "Reset al
 
 # COMMAND ----------
 
-# MAGIC %md-sandbox
-# MAGIC #TODO: introduce your data science story!
-# MAGIC 
-# MAGIC What are you building here ? What's the value for your customer? What's the value of the Lakehouse here? How Databricks can uniquely help building these capabilities vs using a datawarehouse?
-# MAGIC 
-# MAGIC Tips: being able to run some kind of classification to predict the status of your gaz turbines might be interesting for MegaCorp
+# MAGIC %md
+# MAGIC ## Scalable Machine Learning with MLFlow on the Delta Lakehouse
 
 # COMMAND ----------
 
@@ -19,22 +15,17 @@ dbutils.widgets.dropdown("reset_all_data", "false", ["true", "false"], "Reset al
 # MAGIC %md 
 # MAGIC ## Data Exploration
 # MAGIC What do the distributions of sensor readings look like for our turbines? 
-# MAGIC 
-# MAGIC _Plot as bar charts using `summary` as Keys and all sensor Values_
 
 # COMMAND ----------
 
-#To help you, we've preprared a "turbine_gold_for_ml" table that you can re-use for the DS demo. 
-#It should contain the same information as your own gold table
+#read in gold table from ingestion process
 dataset = spark.read.table("turbine_gold_for_ml")
 display(dataset)
 
 # COMMAND ----------
 
-# DBTITLE 1,Visualize Feature Distributions
-#As a DS, our first job is to analyze the data
-#TODO: show some data visualization here
-#Ex: Use sns.pairplot, or show the spark 3.2 pandas integration with visualization integrated to
+# MAGIC %sql
+# MAGIC data
 
 # COMMAND ----------
 
@@ -76,17 +67,13 @@ with mlflow.start_run():
   #Tips: what about auto logging ?
   
   #TODO: log your model under "turbine_gbt"
-  mlflow.spark.log_model(....)
+  mlflow.spark.log_model("/turbine_pred_gbt")
   mlflow.set_tag("model", "turbine_gbt")
 
 # COMMAND ----------
 
 # MAGIC %md ## Save to the model registry
 # MAGIC Get the model having the best metrics.AUROC from the registry
-
-# COMMAND ----------
-
-#TODO: make sure you know how to do these 2 steps using the UI
 
 # COMMAND ----------
 

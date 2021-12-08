@@ -33,7 +33,7 @@ def turbines_bronze():
 @dlt.expect_or_drop("idNotNegative", "ID > 0")
 def turbines_silver():
   jsonSchema = StructType([StructField(col, DoubleType(), False) for col in ["AN3", "AN4", "AN5", "AN6", "AN7", "AN8", "AN9", "AN10", "SPEED", "TORQUE", "ID"]] + [StructField("TIMESTAMP", TimestampType())])
-  df = spark.readStream.option("ignoreChanges", "true").table('dec21_flightschool_team2.turbines_bronze') \
+  df = dlt.read('turbines_bronze') \
        .withColumn("jsonData", from_json(col("value"), jsonSchema)) \
        .select("jsonData.*")
   return df
@@ -50,14 +50,7 @@ def turbines_status_gold():
   table_properties={"delta.autoOptimize.autoCompact" : "true", "delta.autoOptimize.optimizeWrite" : "true"}
 )
 def turbines_gold():
-  turbine_stream = spark.readStream.table('dec21_flightschool_team2.turbines_silver')
-  turbine_status = spark.read.table("dec21_flightschool_team2.turbines_status_gold")
+  turbine_stream = dlt.read('turbines_silver')
+  turbine_status = dlt.read('turbines_status_gold')
   df = turbine_stream.join(turbine_status, ['id'], 'left')
   return df
-
-# COMMAND ----------
-
-#TODO: review the the expectation dashboard and how the data can be used to track ingestion quality
-#more details: https://e2-demo-field-eng.cloud.databricks.com/?o=1444828305810485#notebook/3469214860228002/command/3418422060417474
-#data quality tracker dashboard: https://e2-demo-field-eng.cloud.databricks.com/sql/dashboards/6f73dd1b-17b1-49d0-9a11-b3772a2c3357-dlt---retail-data-quality-stats?o=1444828305810485
-#do not try to reproduce a dashboard for this specific use-case

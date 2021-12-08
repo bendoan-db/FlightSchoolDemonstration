@@ -1,38 +1,41 @@
 # Databricks notebook source
-# MAGIC %md #TODO: build your DBSQL dashboard
+# MAGIC %md #Leveraging Databricks SQL to Visualize Streaming Data and ML Predictions
 # MAGIC 
-# MAGIC Your story should be end 2 end and include a SQL dashboard to present some KPIs
+# MAGIC Using DBSQL we can read our bronze/silver/gold tables from our delta lakehouse into our notebook, and do some high level aggregations and visualizations with inline SQL inject
 
 # COMMAND ----------
 
-# MAGIC %md ### Keep it simple
-# MAGIC The goal for you is to understand how DBSQL is working. 
-# MAGIC 
-# MAGIC To make it simple, we've created some table for you that you can reuse in DBSQL
-
-# COMMAND ----------
-
+# DBTITLE 1,Load tables from the delta lakehouse
 # MAGIC %sql
 # MAGIC create database if not exists demo_turbine;
 # MAGIC CREATE TABLE if not exists `demo_turbine`.`turbine_bronze` USING delta LOCATION 'dbfs:/mnt/quentin-demo-resources/turbine/bronze/data';
 # MAGIC CREATE TABLE if not exists `demo_turbine`.`turbine_silver` USING delta LOCATION 'dbfs:/mnt/quentin-demo-resources/turbine/silver/data';
 # MAGIC CREATE TABLE if not exists `demo_turbine`.`turbine_gold`   USING delta LOCATION 'dbfs:/mnt/quentin-demo-resources/turbine/gold/data' ;
-# MAGIC 
-# MAGIC CREATE TABLE if not exists `demo_turbine`.`turbine_power_prediction` USING delta LOCATION 'dbfs:/mnt/quentin-demo-resources/turbine/power/prediction/data';
-# MAGIC CREATE TABLE if not exists `demo_turbine`.`turbine_power_bronze`     USING delta LOCATION 'dbfs:/mnt/quentin-demo-resources/turbine/power/bronze/data';
 
 # COMMAND ----------
 
-# MAGIC %md Make sure your dashboard include data coming from ML, otherwise you could do the same with any DataWarehouse and you aren't showing a clear distinction vs the competition
-# MAGIC 
-# MAGIC Be smart, fake your data in your SQL select statement for the counters to save some time.
+# MAGIC %md
+# MAGIC ## Loading ML Predictions from our Model Predictions Table
+# MAGIC Leveraging Databricks' Unified Analytics approach, we can also load in our model predictions and do some quick analysis
 
 # COMMAND ----------
 
-# MAGIC %md 
-# MAGIC Looking for inspiration ? Check this:
+# MAGIC %sql
+# MAGIC CREATE TABLE if not exists `demo_turbine`.`turbine_outage_predictions` USING delta LOCATION 'dbfs:/mnt/quentin-demo-resources/turbine/gold/data';
+# MAGIC select id, status as predicted_status from demo_turbine.turbine_outage_predictions
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Leveraging DSQL Dashboards!
 # MAGIC 
-# MAGIC 
-# MAGIC ![turbine-demo-dashboard](https://github.com/QuentinAmbard/databricks-demo/raw/main/iot-wind-turbine/resources/images/turbine-demo-dashboard1.png)
-# MAGIC 
-# MAGIC [Open SQL Analytics dashboard example](https://e2-demo-west.cloud.databricks.com/sql/dashboards/a81f8008-17bf-4d68-8c79-172b71d80bf0-turbine-demo?o=2556758628403379)
+# MAGIC Finally, we can create a comprehensive view of Megacorp's live sensor data, as well as its ML model predictions in a single dashboard, that provides near real-time updates based on incoming sensor data
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC [MegaCorp Turbine Dashboard](https://e2-demo-field-eng.cloud.databricks.com/sql/dashboards/b16116e2-9783-4d24-a6c5-7bca9e5451b4-megacorp-turbine-health-and-outage-predictions?o=1444828305810485)
+
+# COMMAND ----------
+
+
