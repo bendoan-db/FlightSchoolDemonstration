@@ -8,21 +8,34 @@ dbutils.widgets.dropdown("reset_all_data", "false", ["true", "false"], "Reset al
 # COMMAND ----------
 
 # MAGIC %md-sandbox
-# MAGIC #YOUR DEMO INTRO HERE
-# MAGIC TODO: use this cell to present your demo at a high level. What are you building ? What's your story ? How is it linked to megacorp powerplant and its gaz turbine ?
+# MAGIC # Wind Turbine Predictive Maintenance
 # MAGIC 
-# MAGIC What's the data used and what are the fields (be creative!)
+# MAGIC In this example, we demonstrate anomaly detection for the purposes of finding damaged wind turbines. A damaged, single, inactive wind turbine costs energy utility companies thousands of dollars per day in losses.
 # MAGIC 
-# MAGIC Need to display images ? check https://docs.databricks.com/data/filestore.html#filestore
+# MAGIC 
+# MAGIC <img src="https://github.com/QuentinAmbard/databricks-demo/raw/main/iot-wind-turbine/resources/images/turbine-demo-flow.png" width="90%"/>
+# MAGIC 
+# MAGIC 
+# MAGIC <div style="float:right; margin: -10px 50px 0px 50px">
+# MAGIC   <img src="https://s3.us-east-2.amazonaws.com/databricks-knowledge-repo-images/ML/wind_turbine/wind_small.png" width="400px" /><br/>
+# MAGIC   *locations of the sensors*
+# MAGIC </div>
+# MAGIC Our dataset consists of vibration readings coming off sensors located in the gearboxes of wind turbines. 
+# MAGIC 
+# MAGIC We will use Gradient Boosted Tree Classification to predict which set of vibrations could be indicative of a failure.
+# MAGIC 
+# MAGIC One the model is trained, we'll use MFLow to track its performance and save it in the registry to deploy it in production
+# MAGIC 
+# MAGIC 
+# MAGIC 
+# MAGIC *Data Source Acknowledgement: This Data Source Provided By NREL*
+# MAGIC 
+# MAGIC *https://www.nrel.gov/docs/fy12osti/54530.pdf*
 
 # COMMAND ----------
 
-TODO: Use %fs to visualize the incoming data under /mnt/quentin-demo-resources/turbine/incoming-data-json
-
-# COMMAND ----------
-
-# MAGIC %sql
-# MAGIC --TODO : Select and display the entire incoming json data using a simple SQL SELECT query
+# MAGIC %sql 
+# MAGIC select * from parquet.`/mnt/quentin-demo-resources/turbine/incoming-data`
 
 # COMMAND ----------
 
@@ -40,27 +53,31 @@ print(sql("SELECT current_database() AS db").collect()[0]['db'])
 # COMMAND ----------
 
 # DBTITLE 1,Stream landing files from cloud storage
-bronzeDF = spark.readStream .....
-#TODO: ingest data using cloudfile.
-#Incoming data is available under /mnt/quentin-demo-resources/turbine/incoming-data-json
-#Goal: understand autoloader value and functionality (schema evolution, inference)
-#What your customer challenges could be with schema evolution, schema inference, incremental mode having lot of small files? 
-#How do you fix that ?
-#Tips: use .option("cloudFiles.maxFilesPerTrigger", 1) to consume 1 file at a time and simulate a stream during the demo
-                  
-# Write Stream as Delta Table
-bronzeDF.writeStream ...
-#TODO: write the output as "turbine_bronze" delta table, with a trigger of 10 seconds
-#Tips: use y
+bronzeDF = spark.readStream \
+                .format("cloudFiles") \
+                .option("cloudFiles.format", "parquet") \
+                .option("cloudFiles.maxFilesPerTrigger", 1) \
+                .schema("value string, key double") \
+                .load("/mnt/quentin-demo-resources/turbine/incoming-data") 
+
+bronzeDF.writeStream \
+        .option("ignoreChanges", "true") \
+        .trigger(processingTime='10 seconds') \
+        .table("turbine_bronze")
 
 # COMMAND ----------
 
 # DBTITLE 1,Our raw data is now available in a Delta table
 # MAGIC %sql
+# MAGIC create table if not exists turbine_bronze (key double not null, value string) using delta ;
+# MAGIC   
+# MAGIC -- Turn on autocompaction to solve small files issues on your streaming job, that's all you have to do!
+# MAGIC alter table turbine_bronze set tblproperties ('delta.autoOptimize.autoCompact' = true, 'delta.autoOptimize.optimizeWrite' = true);
+
+# COMMAND ----------
+
+# MAGIC %sql
 # MAGIC select * from turbine_bronze;
-# MAGIC 
-# MAGIC --TODO: which table property should you define to solve small files issue ? What's the typicall challenge running streaming operation? And the value for your customer.
-# MAGIC ALTER TABLE turbine_bronze SET TBLPROPERTIES (...)
 
 # COMMAND ----------
 
@@ -71,15 +88,29 @@ bronzeDF.writeStream ...
 
 #Our bronze silver now have "KEY, JSON" as schema. We need to extract the json and expand it as a full table, having 1 column per sensor entry
 
-silverDF = spark.readStream.table('turbine_bronze') ....
-#TODO: use pyspark from_json to explode the JSON: https://spark.apache.org/docs/latest/api/python/reference/api/pyspark.sql.functions.from_json.html
+jsonSchema = StructType([StructField(col, DoubleType(), False) for col in ["AN3", "AN4", "AN5", "AN6", "AN7", "AN8", "AN9", "AN10", "SPEED", "TORQUE", "ID"]] + [StructField("TIMESTAMP", TimestampType())])
 
-silverDF.writeStream ...
-#TODO: write it back to your "turbine_silver" table
+spark.readStream.table('turbine_bronze') \
+     .withColumn("jsonData", from_json(col("value"), jsonSchema)) \
+     .select("jsonData.*") \
+     .writeStream \
+     .option("ignoreChanges", "true") \
+     .format("delta") \
+     .trigger(processingTime='10 seconds') \
+     .table("turbine_silver")
 
 # COMMAND ----------
 
 # MAGIC %sql
+# MAGIC -- let's add some constraints in our table, to ensure or ID can't be negative (need DBR 7.5)
+# MAGIC ALTER TABLE turbine_silver ADD CONSTRAINT idGreaterThanZero CHECK (id >= 0);
+# MAGIC -- let's enable the auto-compaction
+# MAGIC alter table turbine_silver set tblproperties ('delta.autoOptimize.autoCompact' = true, 'delta.autoOptimize.optimizeWrite' = true);
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC -- Select data
 # MAGIC select * from turbine_silver;
 
 # COMMAND ----------
@@ -89,31 +120,35 @@ silverDF.writeStream ...
 
 # COMMAND ----------
 
-#TODO: our data is available under /mnt/quentin-demo-resources/turbine/status. Use dbutils.fs to display the folder content
+# MAGIC %sql 
+# MAGIC create table if not exists turbine_status_gold (id int, status string) using delta;
+# MAGIC 
+# MAGIC COPY INTO turbine_status_gold
+# MAGIC   FROM '/mnt/quentin-demo-resources/turbine/status'
+# MAGIC   FILEFORMAT = PARQUET;
 
 # COMMAND ----------
 
-spark.read.format("parquet").load("/mnt/quentin-demo-resources/turbine/status")
-
-# COMMAND ----------
-
-#TODO: save the status data as our turbine_status table
-spark.readStream.format("parquet").load("/mnt/quentin-demo-resources/turbine/status").writeStream.....saveAsTable("turbine_status")
+# MAGIC %sql select * from turbine_status_gold
 
 # COMMAND ----------
 
 # DBTITLE 1,Join data with turbine status (Damaged or Healthy)
 turbine_stream = spark.readStream.table('turbine_silver')
-turbine_status = spark.read.table("turbine_status")
+turbine_status = spark.read.table("turbine_status_gold")
 
-#TODO: do a left join between turbine_stream and turbine_status on the 'id' key and save back the result as the "turbine_gold" table
-turbine_stream.join(....
+turbine_stream.join(turbine_status, ['id'], 'left') \
+              .writeStream \
+              .option("ignoreChanges", "true") \
+              .format("delta") \
+              .trigger(processingTime='10 seconds') \
+              .table("turbine_gold")
 
 # COMMAND ----------
 
 # MAGIC %sql
 # MAGIC --Our turbine gold table should be up and running!
-# MAGIC select TIMESTAMP, AN3, SPEED, status from turbine_gold;
+# MAGIC select * from turbine_gold
 
 # COMMAND ----------
 
@@ -129,8 +164,15 @@ turbine_stream.join(....
 # COMMAND ----------
 
 # MAGIC %sql
-# MAGIC -- TODO: show some Delta Love.
-# MAGIC -- What's unique to Delta and how can it be usefull for your customer?
+# MAGIC -- DESCRIBE HISTORY turbine_gold;
+# MAGIC -- If needed, we can go back in time to select a specific version or timestamp
+# MAGIC SELECT * FROM turbine_gold TIMESTAMP AS OF '2020-12-01'
+# MAGIC 
+# MAGIC -- And restore a given version
+# MAGIC -- RESTORE turbine_gold TO TIMESTAMP AS OF '2020-12-01'
+# MAGIC 
+# MAGIC -- Or clone the table (zero copy)
+# MAGIC -- CREATE TABLE turbine_gold_clone [SHALLOW | DEEP] CLONE turbine_gold VERSION AS OF 32
 
 # COMMAND ----------
 
