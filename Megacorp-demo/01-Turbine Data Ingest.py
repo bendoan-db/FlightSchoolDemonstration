@@ -12,9 +12,7 @@ dbutils.widgets.dropdown("reset_all_data", "false", ["true", "false"], "Reset al
 # MAGIC 
 # MAGIC In this example, we demonstrate anomaly detection for the purposes of finding damaged wind turbines. A damaged, single, inactive wind turbine costs energy utility companies thousands of dollars per day in losses.
 # MAGIC 
-# MAGIC 
-# MAGIC <img src="resources/images/Screen Shot 2022-01-24 at 7.25.04 PM.png" width="90%"/>
-# MAGIC 
+# MAGIC [test](resources/images/etl-diagram-full)
 # MAGIC 
 # MAGIC 
 # MAGIC 
