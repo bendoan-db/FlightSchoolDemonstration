@@ -19,15 +19,17 @@ dbutils.widgets.dropdown("reset_all_data", "false", ["true", "false"], "Reset al
 # COMMAND ----------
 
 #read in gold table from ingestion process
-dataset = spark.read.table("dec21_flightschool_team2.turbines_gold")
-dataset_siver = spark.read.table("dec21_flightschool_team2.turbines_silver")
-dataset_siver.printSchema()
-
-# COMMAND ----------
-# MAGIC ## Train Model and Track Experiments
+training_dataset = spark.read.table("doan_iot_turbine_demo.turbine_training_data_gold")
+training_dataset.printSchema()
 
 # COMMAND ----------
 
+# DBTITLE 1,Automatically Create Data Profiles for Streaming Data
+dbutils.data.summarize(training_dataset)
+
+# COMMAND ----------
+
+# DBTITLE 1,Train GBT Model and Track Grid Search Using MLFlow
 #once the data is ready, we can train a model
 import mlflow
 import pandas as pd
@@ -40,7 +42,7 @@ from pyspark.mllib.evaluation import MulticlassMetrics
 
 with mlflow.start_run():
 
-  training, test = dataset.limit(1000).randomSplit([0.9, 0.1], seed = 5)
+  training, test = training_dataset.limit(10000).randomSplit([0.9, 0.1])
   
   gbt = GBTClassifier(labelCol="label", featuresCol="features").setMaxIter(5)
   grid = ParamGridBuilder().addGrid(gbt.maxDepth, [3,4,5,10,15,25,30]).build()
@@ -60,9 +62,11 @@ with mlflow.start_run():
   #TODO: how can you use MLFLow to log your metrics (precision, recall, f1 etc) 
   #Tips: what about auto logging ?
   mlflow.log_metric("accuracy", metrics.accuracy)
+  mlflow.log_metric("f1", metrics.f1)
+  mlflow.log_metric("recall", metrics.recall)
   
   #TODO: log your model under "turbine_gbt"
-  mlflow.spark.log_model(pipelineTrained, "ssm_turbine_pred_gbt")
+  mlflow.spark.log_model(pipelineTrained, "doan_ssm_turbine_pred_gbt")
   mlflow.set_tag("model", "turbine_gbt")
 
 # COMMAND ----------
@@ -73,7 +77,7 @@ with mlflow.start_run():
 # COMMAND ----------
 
 best_model = mlflow.search_runs(filter_string='tags.model="turbine_gbt" and attributes.status = "FINISHED"', max_results=1).iloc[0]
-model_registered = mlflow.register_model("dbfs:/databricks/mlflow-tracking/29251126759236/68b9dfc586e344f499da48ed51659d67/artifacts/ssm_turbine_pred_gbt", "smm_registered_model")
+model_registered = mlflow.register_model("dbfs:/databricks/mlflow-tracking/29251126759236/68b9dfc586e344f499da48ed51659d67/artifacts/doan_ssm_turbine_pred_gbt", "doan_ssm_turbine_pred_gbt")
 
 # COMMAND ----------
 

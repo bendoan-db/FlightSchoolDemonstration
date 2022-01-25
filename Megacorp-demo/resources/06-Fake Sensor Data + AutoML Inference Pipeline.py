@@ -74,9 +74,14 @@ model = mlflow.pyfunc.load_model(
     model_uri=f"models:/{model_name}/{model_version}"
 )
 
-model.predict(df)
+pdf = pd.DataFrame(model.predict(df), columns=["STATUS"])
+df['STATUS'] = pdf['STATUS']
 
 # COMMAND ----------
 
 sparkDF=spark.createDataFrame(df)
-sparkDF.write.format("delta").mode("append").saveAsTable("dec21_flightschool_team2.inferences_silver")
+sparkDF.write.format("delta").mode("append").saveAsTable("dec21_flightschool_team2.turbine_inferences_silver")
+
+# COMMAND ----------
+
+

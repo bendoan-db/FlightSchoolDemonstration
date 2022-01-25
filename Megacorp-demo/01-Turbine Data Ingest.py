@@ -13,7 +13,9 @@ dbutils.widgets.dropdown("reset_all_data", "false", ["true", "false"], "Reset al
 # MAGIC In this example, we demonstrate anomaly detection for the purposes of finding damaged wind turbines. A damaged, single, inactive wind turbine costs energy utility companies thousands of dollars per day in losses.
 # MAGIC 
 # MAGIC 
-# MAGIC <img src="https://github.com/QuentinAmbard/databricks-demo/raw/main/iot-wind-turbine/resources/images/turbine-demo-flow.png" width="90%"/>
+# MAGIC <img src="resources/images/Screen Shot 2022-01-24 at 7.25.04 PM.png" width="90%"/>
+# MAGIC 
+# MAGIC 
 # MAGIC 
 # MAGIC 
 # MAGIC <div style="float:right; margin: -10px 50px 0px 50px">
@@ -34,6 +36,7 @@ dbutils.widgets.dropdown("reset_all_data", "false", ["true", "false"], "Reset al
 
 # COMMAND ----------
 
+# DBTITLE 1,View our Raw IoT Data Stream
 # MAGIC %sql 
 # MAGIC select * from parquet.`/mnt/quentin-demo-resources/turbine/incoming-data`
 
@@ -52,7 +55,13 @@ print(sql("SELECT current_database() AS db").collect()[0]['db'])
 
 # COMMAND ----------
 
-# DBTITLE 1,Stream landing files from cloud storage
+# DBTITLE 1,Create Database using In-Line SQL Syntax
+# MAGIC %sql
+# MAGIC CREATE database if not exists doan_iot_turbine_demo
+
+# COMMAND ----------
+
+# DBTITLE 1,Stream Raw IoT into the Bronze Table
 bronzeDF = spark.readStream \
                 .format("cloudFiles") \
                 .option("cloudFiles.format", "parquet") \
@@ -62,22 +71,23 @@ bronzeDF = spark.readStream \
 
 bronzeDF.writeStream \
         .option("ignoreChanges", "true") \
-        .trigger(processingTime='10 seconds') \
-        .table("turbine_bronze")
+        .trigger(processingTime='1 seconds') \
+        .table("doan_iot_turbine_demo.turbine_data_bronze")
 
 # COMMAND ----------
 
-# DBTITLE 1,Our raw data is now available in a Delta table
+# DBTITLE 1,Set Auto-compaction and Optimize Write Partitions to Maximize Stream Efficiency
 # MAGIC %sql
-# MAGIC create table if not exists turbine_bronze (key double not null, value string) using delta ;
+# MAGIC create table if not exists doan_iot_turbine_demo.turbine_data_bronze (key double not null, value string) using delta ;
 # MAGIC   
 # MAGIC -- Turn on autocompaction to solve small files issues on your streaming job, that's all you have to do!
-# MAGIC alter table turbine_bronze set tblproperties ('delta.autoOptimize.autoCompact' = true, 'delta.autoOptimize.optimizeWrite' = true);
+# MAGIC alter table doan_iot_turbine_demo.turbine_data_bronze set tblproperties ('delta.autoOptimize.autoCompact' = true, 'delta.autoOptimize.optimizeWrite' = true);
 
 # COMMAND ----------
 
+# DBTITLE 1,Check Bronze Table
 # MAGIC %sql
-# MAGIC select * from turbine_bronze;
+# MAGIC select * from doan_iot_turbine_demo.turbine_data_bronze;
 
 # COMMAND ----------
 
@@ -86,69 +96,86 @@ bronzeDF.writeStream \
 
 # COMMAND ----------
 
-#Our bronze silver now have "KEY, JSON" as schema. We need to extract the json and expand it as a full table, having 1 column per sensor entry
+# DBTITLE 1,Extract Nested JSON Data and Join with Batch Data on State Geography
+#Our bronze now has "KEY, JSON" as schema. We need to extract the json and expand it as a full table, having 1 column per sensor entry
 
 jsonSchema = StructType([StructField(col, DoubleType(), False) for col in ["AN3", "AN4", "AN5", "AN6", "AN7", "AN8", "AN9", "AN10", "SPEED", "TORQUE", "ID"]] + [StructField("TIMESTAMP", TimestampType())])
 
-spark.readStream.table('turbine_bronze') \
+#join our streaming silver table to batch table on geographic data
+states = spark.read.table("doan_turbine_demo_states_gold")
+
+spark.readStream.table('doan_iot_turbine_demo.turbine_data_bronze') \
      .withColumn("jsonData", from_json(col("value"), jsonSchema)) \
      .select("jsonData.*") \
+     .join(states, ["ID"], 'left')\
      .writeStream \
-     .option("ignoreChanges", "true") \
+     .option("mergeSchema", "true")\
      .format("delta") \
-     .trigger(processingTime='10 seconds') \
-     .table("turbine_silver")
+     .trigger(processingTime='1 seconds') \
+     .table("doan_iot_turbine_demo.turbine_data_silver")
 
 # COMMAND ----------
 
+# DBTITLE 1,Build Constraints into the Silver Table
 # MAGIC %sql
 # MAGIC -- let's add some constraints in our table, to ensure or ID can't be negative (need DBR 7.5)
-# MAGIC ALTER TABLE turbine_silver ADD CONSTRAINT idGreaterThanZero CHECK (id >= 0);
+# MAGIC ALTER TABLE doan_iot_turbine_demo.turbine_data_silver ADD CONSTRAINT idGreaterThanZero CHECK (id >= 0);
 # MAGIC -- let's enable the auto-compaction
-# MAGIC alter table turbine_silver set tblproperties ('delta.autoOptimize.autoCompact' = true, 'delta.autoOptimize.optimizeWrite' = true);
+# MAGIC alter table doan_iot_turbine_demo.turbine_data_silver set tblproperties ('delta.autoOptimize.autoCompact' = true, 'delta.autoOptimize.optimizeWrite' = true);
+
+# COMMAND ----------
+
+silver_turbine_df = spark.readStream.table('doan_iot_turbine_demo.turbine_data_silver')
+silver_turbine_df.createOrReplaceTempView('temp_silver')
 
 # COMMAND ----------
 
 # MAGIC %sql
 # MAGIC -- Select data
-# MAGIC select * from turbine_silver;
+# MAGIC select avg(speed) as average_speed, timestamp as date 
+# MAGIC from temp_silver
+# MAGIC group by timestamp
+# MAGIC having average_speed > 0;
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 3/ Gold layer: join information on Turbine status to add a label to our dataset
+# MAGIC ## 3/ Gold layer: Final Joins and Enrichments
 
 # COMMAND ----------
 
+# DBTITLE 1,Create a Gold Table with Labels for Training
 # MAGIC %sql 
-# MAGIC create table if not exists turbine_status_gold (id int, status string) using delta;
+# MAGIC create table if not exists doan_iot_turbine_demo.turbine_labels_gold (id int, status string) using delta;
 # MAGIC 
-# MAGIC COPY INTO turbine_status_gold
+# MAGIC COPY INTO doan_iot_turbine_demo.turbine_labels_gold
 # MAGIC   FROM '/mnt/quentin-demo-resources/turbine/status'
 # MAGIC   FILEFORMAT = PARQUET;
 
 # COMMAND ----------
 
-# MAGIC %sql select * from turbine_status_gold
+# MAGIC %sql select * from doan_iot_turbine_demo.turbine_labels_gold
 
 # COMMAND ----------
 
-# DBTITLE 1,Join data with turbine status (Damaged or Healthy)
-turbine_stream = spark.readStream.table('turbine_silver')
-turbine_status = spark.read.table("turbine_status_gold")
+# DBTITLE 1,Join Silver Stream Date with Labels to Create Gold Training Table
+turbine_silver_stream = spark.readStream.table('doan_iot_turbine_demo.turbine_data_silver')
+turbine_status = spark.read.table("doan_iot_turbine_demo.turbine_labels_gold")
 
-turbine_stream.join(turbine_status, ['id'], 'left') \
-              .writeStream \
-              .option("ignoreChanges", "true") \
+turbine_gold_stream = turbine_silver_stream.join(turbine_status, ['id'], 'left') \
+
+turbine_gold_stream.writeStream \
+              .option("mergeSchema", "true") \
               .format("delta") \
               .trigger(processingTime='10 seconds') \
-              .table("turbine_gold")
+              .table("doan_iot_turbine_demo.turbine_training_data_gold ")
+
 
 # COMMAND ----------
 
 # MAGIC %sql
 # MAGIC --Our turbine gold table should be up and running!
-# MAGIC select * from turbine_gold
+# MAGIC select * from doan_iot_turbine_demo.turbine_training_data_gold
 
 # COMMAND ----------
 
@@ -194,9 +221,50 @@ turbine_stream.join(turbine_status, ['id'], 'left') \
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Don't forget to Cancel all the streams once your demo is over
+# MAGIC ### With Streaming predictions for our turbines, your plant operators can take proactive measures and prevent unplanned downtime
+# MAGIC   
+# MAGIC   <img src="https://github.com/QuentinAmbard/databricks-demo/raw/main/iot-wind-turbine/resources/images/turbine-demo-flow-da.png" width="90%"/>
 
 # COMMAND ----------
 
+# note-to-self: don't forget to clean up after one's own self
+
 for s in spark.streams.active:
   s.stop()
+
+# COMMAND ----------
+
+# DBTITLE 1,Predict Health Status of Turbine Using a Registered Model
+import mlflow.pyfunc
+
+model_name = "dec21_flightschool_team2_predict_turbine_status"
+model_version = 1
+
+model = mlflow.pyfunc.load_model(
+    model_uri=f"models:/{model_name}/{model_version}"
+)
+
+pdf = pd.DataFrame(model.predict(df), columns=["STATUS"])
+df['STATUS'] = pdf['STATUS']
+
+# COMMAND ----------
+
+sparkDF=spark.createDataFrame(df)
+sparkDF.write.format("delta").mode("append").saveAsTable("dec21_flightschool_team2.turbine_inferences_silver")
+
+# COMMAND ----------
+
+# MAGIC %md 
+# MAGIC 
+# MAGIC <h2> Overall Value: </h2>
+# MAGIC 
+# MAGIC <li> Highly scalable and easy to read pipelines </li>
+# MAGIC <li> Multi language, same tech for any cloud platform </li>
+# MAGIC <li> Read and write to almost any data source </li>
+# MAGIC <li> Easy to build and debug </li>
+# MAGIC <li> Logic is in one place for all teams to see, increasing speed, transparency, and knowledge transfer </li>
+# MAGIC <li> Less code to write overall since streaming takes care of the incremental data checkpoint for you </li>
+
+# COMMAND ----------
+
+

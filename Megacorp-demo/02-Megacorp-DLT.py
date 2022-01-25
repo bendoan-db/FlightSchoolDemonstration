@@ -1,15 +1,13 @@
 # Databricks notebook source
-# MAGIC %md #Introducing Delta Live Table
+# MAGIC %md #Introducing Delta Live Tables (DLT)
 # MAGIC 
-# MAGIC TODO: Explain the typical challenges a customer will face without DLT
+# MAGIC ![DLT Explained](https://databricks.com/wp-content/uploads/2021/05/dlt-blog-img-2-1024x545.png)
 # MAGIC 
-# MAGIC TODO: Explain what DLT is adding as value for the customer
+# MAGIC Delta Live Tables is a new framework designed to enable customers to declaratively define, deploy, test & upgrade data pipelines and eliminate operational burdens associated with the management of such pipelines.
+# MAGIC 
+# MAGIC This repo contains Delta Live Table examples designed to get customers started with building, deploying and running pipelines.
 
 # COMMAND ----------
-
-#go in Job => DLT, create your DLT pointing to your notebook
-#help: https://docs.databricks.com/data-engineering/delta-live-tables/index.html
-#Remember: you can use the retail DLT as example
 
 import dlt
 from pyspark.sql.functions import *
@@ -51,3 +49,7 @@ def turbines_gold():
   turbine_status = dlt.read('turbines_status_gold')
   df = turbine_stream.join(turbine_status, ['id'], 'left')
   return df
+
+# COMMAND ----------
+
+
