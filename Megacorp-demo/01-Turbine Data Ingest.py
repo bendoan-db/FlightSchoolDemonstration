@@ -12,7 +12,9 @@ dbutils.widgets.dropdown("reset_all_data", "false", ["true", "false"], "Reset al
 # MAGIC 
 # MAGIC In this example, we demonstrate anomaly detection for the purposes of finding damaged wind turbines. A damaged, single, inactive wind turbine costs energy utility companies thousands of dollars per day in losses.
 # MAGIC 
-# MAGIC [test](resources/images/etl-diagram-full)
+# MAGIC 
+# MAGIC <img src="https://github.com/bendoan-db/FlightSchoolDemonstration/blob/master/Megacorp-demo/resources/images/etl-diagram-full?raw=true" width="70%"/>
+# MAGIC 
 # MAGIC 
 # MAGIC 
 # MAGIC 
@@ -41,7 +43,9 @@ dbutils.widgets.dropdown("reset_all_data", "false", ["true", "false"], "Reset al
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 1/ Bronze layer: ingest data stream
+# MAGIC ## 1/ Bronze layer: Ingest Data Stream
+# MAGIC 
+# MAGIC <img src="https://github.com/bendoan-db/FlightSchoolDemonstration/blob/master/Megacorp-demo/resources/images/etl-diagram-ingest?raw=true" width="60%"/>
 
 # COMMAND ----------
 
@@ -90,13 +94,12 @@ bronzeDF.writeStream \
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 2/ Silver layer: transform JSON data into tabular table
+# MAGIC ## 2/ Silver layer: Extract/Clean JSON Data and Join with State Geo Codes
 
 # COMMAND ----------
 
 # DBTITLE 1,Extract Nested JSON Data and Join with Batch Data on State Geography
 #Our bronze now has "KEY, JSON" as schema. We need to extract the json and expand it as a full table, having 1 column per sensor entry
-
 jsonSchema = StructType([StructField(col, DoubleType(), False) for col in ["AN3", "AN4", "AN5", "AN6", "AN7", "AN8", "AN9", "AN10", "SPEED", "TORQUE", "ID"]] + [StructField("TIMESTAMP", TimestampType())])
 
 #join our streaming silver table to batch table on geographic data
@@ -142,9 +145,9 @@ silver_turbine_df.createOrReplaceTempView('temp_silver')
 
 # COMMAND ----------
 
-# DBTITLE 1,Create a Gold Table with Labels for Training
+# DBTITLE 1,Create a Silver Table with Labels for Training
 # MAGIC %sql 
-# MAGIC create table if not exists doan_iot_turbine_demo.turbine_labels_gold (id int, status string) using delta;
+# MAGIC create table if not exists doan_iot_turbine_demo.turbine_labels_silver (id int, status string) using delta;
 # MAGIC 
 # MAGIC COPY INTO doan_iot_turbine_demo.turbine_labels_gold
 # MAGIC   FROM '/mnt/quentin-demo-resources/turbine/status'
@@ -152,13 +155,13 @@ silver_turbine_df.createOrReplaceTempView('temp_silver')
 
 # COMMAND ----------
 
-# MAGIC %sql select * from doan_iot_turbine_demo.turbine_labels_gold
+# MAGIC %sql select * from doan_iot_turbine_demo.turbine_labels_silver
 
 # COMMAND ----------
 
 # DBTITLE 1,Join Silver Stream Date with Labels to Create Gold Training Table
 turbine_silver_stream = spark.readStream.table('doan_iot_turbine_demo.turbine_data_silver')
-turbine_status = spark.read.table("doan_iot_turbine_demo.turbine_labels_gold")
+turbine_status = spark.read.table("doan_iot_turbine_demo.turbine_labels_silver")
 
 turbine_gold_stream = turbine_silver_stream.join(turbine_status, ['id'], 'left') \
 
@@ -166,7 +169,7 @@ turbine_gold_stream.writeStream \
               .option("mergeSchema", "true") \
               .format("delta") \
               .trigger(processingTime='10 seconds') \
-              .table("doan_iot_turbine_demo.turbine_training_data_gold ")
+              .table("doan_iot_turbine_demo.turbine_training_data_gold")
 
 
 # COMMAND ----------
@@ -184,14 +187,14 @@ turbine_gold_stream.writeStream \
 # COMMAND ----------
 
 # MAGIC %sql
-# MAGIC DELETE FROM turbine_gold where timestamp < '2020-00-01';
+# MAGIC DELETE FROM doan_iot_turbine_demo.turbine_training_data_gold where timestamp < '2020-00-01';
 
 # COMMAND ----------
 
 # MAGIC %sql
 # MAGIC -- DESCRIBE HISTORY turbine_gold;
 # MAGIC -- If needed, we can go back in time to select a specific version or timestamp
-# MAGIC SELECT * FROM turbine_gold TIMESTAMP AS OF '2020-12-01'
+# MAGIC SELECT * FROM doan_iot_turbine_demo.turbine_training_data_gold TIMESTAMP AS OF '2020-12-01'
 # MAGIC 
 # MAGIC -- And restore a given version
 # MAGIC -- RESTORE turbine_gold TO TIMESTAMP AS OF '2020-12-01'
